@@ -1,11 +1,7 @@
-use std::sync::Arc;
+use std::{error, fs::File, io::Write, path::Path, sync::Arc};
 
 use bevy::{
-    pbr::AmbientLight,
-    prelude::*,
-    math::primitives::Cuboid,
-    render::view::NoFrustumCulling,
-    render::prelude::Msaa
+    ecs::relationship::RelationshipSourceCollection, math::primitives::Cuboid, pbr::AmbientLight, prelude::*, render::{prelude::Msaa, view::NoFrustumCulling}
 };
 
 use bevy_eventlistener::prelude::*;
@@ -14,7 +10,21 @@ use bevy_picking::prelude::*;
 
 use bevy_egui::{egui::{self, Color32, FontData, FontDefinitions, FontFamily}, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
 
-use bevy_midi::prelude::*;
+use midi_piano_visualizer::prelude::*;
+
+use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize)]
+struct TransformSaveData {
+    translation: [f32; 3],
+    rotation: [f32; 4],
+    scale: [f32; 3],
+}
+#[derive(Serialize, Deserialize)]
+struct SaveData {
+    transforms: TransformSaveData
+}
+use std::fs;
 
 const CAMERA_POS: Vec3 = Vec3::new(0., 5., -16.);
 
@@ -25,12 +35,24 @@ struct SelectedColor(Color32);
 fn main() {
     
     App::new()
-     .add_plugins(DefaultPlugins)
+     .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                transparent: true, // ← 透明を有効化
+                decorations: true, // ← 枠
+                #[cfg(target_os = "macos")]
+                composite_alpha_mode: CompositeAlphaMode::PostMultiplied,
+                #[cfg(target_os = "linux")]
+                composite_alpha_mode: CompositeAlphaMode::PreMultiplied,
+                ..default()
+            }),
+            ..default()
+        }))
      .add_plugins((
             DefaultPickingPlugins,         // 入力とイベント処理
             //InteractionPlugin,     // イベントのバブリング
             MeshPickingPlugin,     // ← これが RayMap を提供する！
         ))
+        
         .add_plugins(EguiPlugin::default())
         .insert_resource(AmbientLight {
             color: Color::WHITE,
@@ -42,6 +64,7 @@ fn main() {
         .add_plugins(MidiOutputPlugin)
         .init_resource::<MidiOutputSettings>()
         .insert_resource(SelectedColor(Color32::WHITE))
+        .insert_resource(ClearColor(Color::NONE))
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -54,8 +77,7 @@ fn main() {
                 display_release,
                 key_input_system,
             )).add_systems(EguiPrimaryContextPass, (
-                ui_menu_bar,
-                show_color_picker
+                ui_menu_bar
             ))
             .insert_resource(WindowState { show_tool_window: true })
 
@@ -90,12 +112,18 @@ struct WindowState {
 }
 
 
-fn ui_menu_bar(mut contexts: EguiContexts, mut state: ResMut<WindowState>) {
+fn ui_menu_bar(mut contexts: EguiContexts, mut state: ResMut<WindowState>, mut selected: ResMut<SelectedColor>) {
     let mut show = state.show_tool_window;
     egui::Window::new("Tool").open(&mut show).show(contexts.ctx_mut().unwrap(), |ui| {
-        ui.label("Add Label");
-        if ui.button("Click").clicked() {
-            println!("ボタンがクリックされました！");
+        // カラーピッカーを表示
+        ui.label("Choose Notes Color");
+        egui::color_picker::color_edit_button_srgba(ui, &mut selected.0, egui::color_picker::Alpha::OnlyBlend);
+
+        ui.separator();
+        ui.colored_label(selected.0, "selected");
+
+        ui.label("Menu");
+        if ui.button("Quit Menu (m)").clicked() {
             state.show_tool_window = false; 
         }
     });
@@ -194,19 +222,6 @@ fn on_out(_out:  Trigger<Pointer<Out>>, mut commands: Commands) {
 fn on_down(_down: Trigger<Pointer<Pressed>>, mut commands: Commands) {
     commands.entity(_down.target()).insert(PressedKey);
 }
-
-fn show_color_picker(mut contexts: EguiContexts, mut selected: ResMut<SelectedColor>) {
-    egui::Window::new("Color Settings").show(contexts.ctx_mut().unwrap(), |ui| {
-        ui.label("Choose:");
-
-        // カラーピッカーを表示
-        egui::color_picker::color_edit_button_srgba(ui, &mut selected.0, egui::color_picker::Alpha::OnlyBlend);
-
-        ui.separator();
-        ui.colored_label(selected.0, "selected");
-    });
-}
-
 
 fn spawn_note(
     commands: &mut Commands,
@@ -308,13 +323,45 @@ fn display_release(mut query: Query<(&mut Transform, &Key), Without<PressedKey>>
 }
 
 // キー入力を処理するシステム
-fn key_input_system(mut commands: Commands, key_input: Res<ButtonInput<KeyCode>>, mut query: Query<&mut Transform, With<Camera3d>>, notes: Query<Entity, With<Note>>, mut state: ResMut<WindowState>) {
-    for mut transform in &mut query {
+fn key_input_system(mut commands: Commands, key_input: Res<ButtonInput<KeyCode>>, mut query: Query<(Entity, &mut Transform), With<Camera3d>>, notes: Query<Entity, With<Note>>, mut state: ResMut<WindowState>) {
+    for (entity, mut transform) in &mut query {
         let up = key_input.pressed(KeyCode::ArrowUp) || key_input.pressed(KeyCode::KeyW);
         let down = key_input.pressed(KeyCode::ArrowDown) || key_input.pressed(KeyCode::KeyS);
         let left = key_input.pressed(KeyCode::ArrowLeft) || key_input.pressed(KeyCode::KeyA);
         let right = key_input.pressed(KeyCode::ArrowRight) || key_input.pressed(KeyCode::KeyD);
-        let c = key_input.pressed(KeyCode::KeyC);
+        let digit0 = key_input.just_pressed(KeyCode::Digit0);
+        let digit1 = key_input.just_pressed(KeyCode::Digit1);
+        let digit2 = key_input.just_pressed(KeyCode::Digit2);
+        let digit3 = key_input.just_pressed(KeyCode::Digit3);
+        let digit4 = key_input.just_pressed(KeyCode::Digit4);
+        let digit5 = key_input.just_pressed(KeyCode::Digit5);
+        let digit6 = key_input.just_pressed(KeyCode::Digit6);
+        let digit7 = key_input.just_pressed(KeyCode::Digit7);
+        let digit8 = key_input.just_pressed(KeyCode::Digit8);
+        let digit9 = key_input.just_pressed(KeyCode::Digit9);
+        let mut digit = 0;
+        if digit0 {
+            digit = 0;
+        } else if digit1 {
+            digit = 1;
+        } else if digit2 {
+            digit = 2;
+        } else if digit3 {
+            digit = 3;
+        } else if digit4 {
+            digit = 4;
+        } else if digit5 {
+            digit = 5;
+        } else if digit6 {
+            digit = 6;
+        } else if digit7 {
+            digit = 7;
+        } else if digit8 {
+            digit = 8;
+        } else if digit9 {
+            digit = 9;
+        }
+        let is_digit = digit0 || digit1 || digit2 || digit3 || digit4 || digit5 || digit6 || digit7 || digit8 || digit9;
         let e = key_input.pressed(KeyCode::KeyE);
         let m_just = key_input.just_pressed(KeyCode::KeyM);
         let q = key_input.pressed(KeyCode::KeyQ);
@@ -350,6 +397,25 @@ fn key_input_system(mut commands: Commands, key_input: Res<ButtonInput<KeyCode>>
                 transform.translation.x -= 0.1;
             }
         }
+        if is_digit {
+            if ctrl {
+                let data = SaveData {
+                    transforms: TransformSaveData {
+                        translation: transform.translation.to_array(),
+                        rotation: transform.rotation.to_array(),
+                        scale: transform.scale.to_array(),
+                    },
+                };
+                save_camera_location(&data, digit);
+            } else {
+                let camera_loc = load_camera_location(digit);
+                if (camera_loc.is_some()) {
+                    let tf = camera_loc.unwrap().transforms;
+                    let ctf = Transform::from_translation(Vec3::from_array(tf.translation)).with_rotation(Quat::from_array(tf.rotation)).with_scale(Vec3::from_array(tf.scale));
+                    commands.entity(entity).insert(ctf);
+                }
+            }
+        }
         if ctrl && up || q {
             if shift {
                 transform.rotation *= Quat::from_rotation_y(0.01);
@@ -372,10 +438,6 @@ fn key_input_system(mut commands: Commands, key_input: Res<ButtonInput<KeyCode>>
         if esc {
             // ノーツをクリア
             notes.iter().for_each(|note| commands.entity(note).despawn());
-        }
-        if c {
-            // カラーパレットを開く
-
         }
         if m_just {
             // メニューを開く/閉じる
@@ -427,4 +489,25 @@ fn connect_to_first_output_port(input: Res<MidiOutput>) {
             input.connect(port.clone());
         }
     }
+}
+
+
+fn save_camera_location(data: &SaveData, index: usize) {
+    let path = Path::new(".mpv");
+
+    if ! path.exists() {
+        if let Err(e) = fs::create_dir_all(path) {
+            println!("ディレクトリ作成に失敗しました: {}", e);
+            return;
+        }
+    }
+    if let Ok(json) = serde_json::to_string(data) {
+        let mut file = File::create(format!(".mpv/save{index}.json")).expect("Failed to create file");
+        file.write_all(json.as_bytes()).expect("Failed to write data");
+    }    
+}
+
+fn load_camera_location(index: usize) -> Option<SaveData> {
+    let json = fs::read_to_string(format!(".mpv/save{index}.json")).ok()?;
+    serde_json::from_str(&json).ok()
 }

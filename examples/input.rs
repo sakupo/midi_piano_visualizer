@@ -3,7 +3,7 @@ use bevy::{
     log::{Level, LogPlugin},
     prelude::*,
 };
-use bevy_midi::prelude::*;
+use midi_piano_visualizer::prelude::*;
 
 const KEY_PORT_MAP: [(KeyCode, usize); 10] = [
     (KeyCode::Digit0, 0),
@@ -27,7 +27,7 @@ fn main() {
         })
         .add_plugins(DefaultPlugins.set(LogPlugin {
             level: Level::WARN,
-            filter: "bevy_midi=debug".to_string(),
+            filter: "midi_piano_visualizer=debug".to_string(),
             ..default()
         }))
         .add_plugins(MidiInputPlugin)

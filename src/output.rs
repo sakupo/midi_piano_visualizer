@@ -31,7 +31,7 @@ pub struct MidiOutputSettings {
 impl Default for MidiOutputSettings {
     fn default() -> Self {
         MidiOutputSettings {
-            port_name: "bevy_midi",
+            port_name: "midi_piano_visualizer",
         }
     }
 }

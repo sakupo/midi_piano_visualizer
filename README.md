@@ -5,7 +5,7 @@ Connect to a MIDI keyboard to visualize your input.
 Run `cargo run --release --example piano`
 
 # Support
-|bevy|bevy_midi|
+|bevy|midi_piano_visualizer|
 |---|---|
 |0.16|0.1.X|
 

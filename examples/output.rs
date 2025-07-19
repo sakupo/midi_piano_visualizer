@@ -2,7 +2,7 @@ use bevy::{
     color::palettes::basic::{GREEN, RED},
     prelude::*,
 };
-use bevy_midi::prelude::*;
+use midi_piano_visualizer::prelude::*;
 
 const KEY_PORT_MAP: [(KeyCode, usize); 10] = [
     (KeyCode::Digit0, 0),

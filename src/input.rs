@@ -36,8 +36,8 @@ pub struct MidiInputSettings {
 impl Default for MidiInputSettings {
     fn default() -> Self {
         Self {
-            client_name: "bevy_midi", // XXX: change client name? Test examples?
-            port_name: "bevy_midi",
+            client_name: "midi_piano_visualizer", // XXX: change client name? Test examples?
+            port_name: "midi_piano_visualizer",
             ignore: Ignore::None,
         }
     }

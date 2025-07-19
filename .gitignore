@@ -5,3 +5,5 @@ Cargo.lock
 
 package-lock.json
 .vscode/launch.json
+
+.mpv/
